@@ -47,7 +47,59 @@ def check_hashes(password, hashed_text):
     
     return False
 
+from logging import Logger
 geolocator = Nominatim(user_agent="taxy_co")
+
+
+def get_nominatim_geocode(address):
+    try:
+      location = geolocator.geocode(address)
+      return location.raw['lon'], location.raw['lat']
+    except Exception as e:
+        # print(e)
+        return None, None
+    
+    
+def get_geocode(address):
+  long,lat = get_nominatim_geocode(address)
+  return long, lat
+
+class newUser :
+    def __init__(self, name, email, number, user_Type, address):
+        #userCount = 0
+
+
+                 
+        self.name = name
+        self.type = user_Type
+        
+        self.email = email 
+        self.number = number
+        
+        self.address = address
+        
+        self.newUserid = make_hashes_len(name+str(user_Type)+(address), 5)
+        
+
+        self.location = geolocator.geocode(self.address)
+        
+        self.latitude = self.location.latitude
+        self.longitude = self.location.longitude
+        
+        self.city = self.location.raw.get('display_name')
+        
+        
+        self.Details = {
+            
+            'newUserName' : self.name,
+            'newUserEmail' : self.email,
+            'newUserNumber': self.number,
+            
+            'newUserType' : self.type,
+            'newUserId': self.newUserid,
+            'newUserAddress': self.address
+            } 
+        
 class newTaxi :
     
     

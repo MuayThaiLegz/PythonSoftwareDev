@@ -44,7 +44,7 @@ import pyarrow.parquet as pq
 import pygeohash
 import jsonschema
 from jsonschema.exceptions import ValidationError
-from backendFunc import newTaxi, CabTypecolors, make_map
+from backendFunc import newTaxi,newUser ,CabTypecolors, make_map, get_geocode, get_nominatim_geocode
 from logging import Logger
 import requests, enum
 import urllib.parse
@@ -53,18 +53,35 @@ from geopy.geocoders import Nominatim
 def make_hashes_len(password, lenOfhash=int):
     	return shake_256(str.encode(password)).hexdigest(lenOfhash)
  
-def create_table():
+def create_driver_table():
     c.execute('CREATE TABLE IF NOT EXISTS TaxiData(driver_name TEXT, driver_email TEXT UNIQUE, driver_number NUMBER UNIQUE, taxy_Type TEXT, lat_point NUMBER,lon_point NUMBER ,taxy_id TEXT UNIQUE)')
     conn.commit()
 
-def add_data(driver_name,driver_email,driver_number,taxy_Type,lat_point,lon_point ,taxy_id):
-    c.execute('INSERT INTO TaxiData(driver_name,driver_email,driver_number,taxy_Type,lat_point,lon_point, taxy_id) VALUES (?,?,?,?,?,?,?)',(driver_name,driver_email,driver_number,taxy_Type,lat_point,lon_point,taxy_id))
+
+def create_user_table():
+    c.execute('CREATE TABLE IF NOT EXISTS UserData(newUserName TEXT, newUserEmail TEXT UNIQUE, newUserNumber NUMBER UNIQUE, newUserType TEXT, lat_point NUMBER,lon_point NUMBER ,newUserId TEXT UNIQUE)')
     conn.commit()
 
-def view_all_data():
+
+def add_driver_data(driver_name,driver_email,driver_number,taxy_Type,lat_point,lon_point ,taxy_id):
+    c.execute('INSERT INTO TaxiData(driver_name,driver_email,driver_number,taxy_Type,lat_point,lon_point, taxy_id) VALUES (?,?,?,?,?,?,?)',(driver_name,driver_email,driver_number,taxy_Type,lat_point,lon_point,taxy_id))
+    conn.commit()
+    
+def add_user_data(newUserName,newUserEmail, newUserNumber,newUserType ,lat_point,lon_point ,newUserId):
+    c.execute('INSERT INTO UserData(newUserName,newUserEmail, newUserNumber,newUserType ,lat_point,lon_point ,newUserId) VALUES (?,?,?,?,?,?,?)',(newUserName,newUserEmail, newUserNumber,newUserType ,lat_point,lon_point ,newUserId))
+    conn.commit()
+
+
+def view_all_taxi():
     c.execute('SELECT * FROM TaxiData')
     data = c.fetchall()
     return data
+
+def view_all_user():
+    c.execute('SELECT * FROM UserData')
+    data = c.fetchall()
+    return data
+
 
 def edit_driver_data(driver_email,driver_number,taxy_Type):
 	c.execute("UPDATE TaxiData SET driver_email =?,driver_number=?,taxy_Type=? WHERE taxy_id=?",(driver_email,driver_number,taxy_Type))
@@ -72,8 +89,20 @@ def edit_driver_data(driver_email,driver_number,taxy_Type):
 	data = c.fetchall()
 	return data
 
-def delete_data(taxy_id):
+def edit_user_data(newUserEmail,newUserNumber,newUserType):
+	c.execute("UPDATE UserData SET newUserEmail =?,newUserNumber=?,newUserType=? WHERE newUserId=?",(newUserEmail,newUserNumber,newUserType))
+	conn.commit()
+	data = c.fetchall()
+	return data
+
+
+def delete_taxy_data(taxy_id):
     c.execute('DELETE FROM TaxiData WHERE taxy_id="{}"'.format(taxy_id))
+    
+def delete_user_data(user_id):
+    c.execute('DELETE FROM UserData WHERE user_id="{}"'.format(user_id))
+    
+    
 from shapely import Point
 from shapely.geometry import Polygon, CAP_STYLE
 # emojis: https://www.webfx.com/tools/emoji-cheat-sheet/
@@ -82,7 +111,7 @@ st.set_page_config(page_title="Taxi-Co Dashboard", page_icon=":taxi:", layout="w
 
 
 import sqlite3
-conn = sqlite3.connect("Taxy_data.db")
+conn = sqlite3.connect("Taxy_coo.db")
 c = conn.cursor()
 #conn.close()
 
@@ -98,8 +127,8 @@ def main(**state):
 
 # Collecting the User's Information on the Inflow/Outflow/Loans page
 
-    menu = ['SignUp']
-    #choice = st.sidebar.selectbox('Menu', menu)
+    menu = ['SignUp','UpdateAct']
+    
     choice = option_menu(
         menu_title="Main Menu",
         options= menu,
@@ -107,20 +136,21 @@ def main(**state):
         default_index = 0,
         orientation = "horizontal"
     )
-    create_table();# create_budgettable();create_bank_table()
+    create_driver_table(); create_user_table();#create_bank_table()
 
-    result = view_all_data()   
+    result = view_all_taxi()   
     clean_df = pd.DataFrame(result,columns=["driver_name", "driver_email","driver_number","taxy_Type", "lat_point","lon_point", "taxy_id"])
     #service_area = Polygon([(37.8287, -122.3555), (37.8044, 122.2712), (37.3387, 121.8853), (37.9780, 122.0311), (37.9101, 122.0652), (37.6688, 122.0810)])
 
     if choice == 'SignUp':
         country ="USA"
         
-        Driver_opps = ['GivaRide', 'GetaRide', 'UpdateAct'] # and?
-        
+        Driver_opps = ['GivaRide', 'GetaRide'] # and?
         Driver_opps = st.sidebar.selectbox("Select: ", options=Driver_opps)
         
         if Driver_opps == "GivaRide":
+            
+            
             country ="USA"            
             name = st.sidebar.text_input("Add name")
             city = st.sidebar.text_input("Add city")
@@ -129,13 +159,60 @@ def main(**state):
             taxy_Type = st.sidebar.selectbox("Taxy Category:",
                                         options=['Utility', 'Deluxe', 'Luxury', 'RideShare'])
             
-            newUsertest = newTaxi(name, email, number, taxy_Type,city)
-            latitude = newUsertest.latitude
-            longitude = newUsertest.longitude        
+            newTaxytest = newTaxi(name, email, number, taxy_Type,city)
+            newTaxylatitude = newTaxytest.latitude
+            newTaxylongitude = newTaxytest.longitude        
+            
+            # Check if a given location (taxi's location) is within the service area
+            taxi_location = (newTaxylatitude, newTaxylongitude)
+ 
+            #if service_area.contains(Point(taxi_location)):
+             #   st.success("Taxi is within the service area.")    
+            #else:
+             #   st.error("Taxi is outside the service area.")
+                
+            
+            TaxyDetails = pd.DataFrame(newTaxytest.Details)  
+            pd.DataFrame(TaxyDetails)
+        
+            newTaxiDName = newTaxytest.Details.get('newTaxiDName')
+            newTaxyDEmail = newTaxytest.Details.get('newTaxyDEmail')
+            newTaxyDNumber = newTaxytest.Details.get('newTaxyDNumber')
+            newTaxyType = newTaxytest.Details.get('newTaxyType')
+            newTaxyId = newTaxytest.Details.get('newTaxyId')
+            
+            #newTaxyCity = newUsertest.Details.get('newTaxyCity')
+            #newUserPoint = newUsertest.Details.get('newUserPoint')
+            
+            if st.sidebar.button('Add Taxy'):
+                
+                add_driver_data(newTaxiDName, newTaxyDEmail, 
+                        driver_number = newTaxyDNumber,
+                        taxy_Type = newTaxyType,
+                        taxy_id = newTaxyId, lat_point=newTaxylatitude,
+                        lon_point=newTaxylongitude)  
+                
+                st.sidebar.success("Added {} To fleet".format(newTaxyId))
+                
+                
+                
+                
+        if Driver_opps == 'GetaRide':
+            country ="USA"            
+            Rider_name = st.sidebar.text_input("Add name")
+            Rider_address = st.sidebar.text_input("Add address")
+            Rider_email = st.sidebar.text_input("Add email")
+            Rider_number = st.sidebar.text_input("Add number")
+            Rider_Type = st.sidebar.selectbox("User Category:",
+                                        options=['FirstTime', 'Frequent', 'VipUser', 'NoAccount'])
+
+            newUsertest = newUser(Rider_name, Rider_email, Rider_number, Rider_Type, Rider_address)
+            #latitude = newUsertest.latitude
+            #longitude = newUsertest.longitude        
             
             
             # Check if a given location (taxi's location) is within the service area
-            taxi_location = (latitude, longitude)
+            #taxi_location = (latitude, longitude)
  
             #if service_area.contains(Point(taxi_location)):
                                 
@@ -146,31 +223,42 @@ def main(**state):
              #   st.error("Taxi is outside the service area.")
                 
             
-            UserDetails = pd.DataFrame(newUsertest.Details)  
-            pd.DataFrame(UserDetails)
-        
-            newTaxiDName = newUsertest.Details.get('newTaxiDName')
-            newTaxyDEmail = newUsertest.Details.get('newTaxyDEmail')
-            newTaxyDNumber = newUsertest.Details.get('newTaxyDNumber')
-            newTaxyType = newUsertest.Details.get('newTaxyType')
-            newTaxyId = newUsertest.Details.get('newTaxyId')
+            newUsertest.Details 
+    
+            
+            newUserName = newUsertest.Details.get('newUserName')
+            newUserEmail = newUsertest.Details.get('newUserEmail')
+            newUserNumber = newUsertest.Details.get('newUserNumber')
+            newUserType = newUsertest.Details.get('newUserType')
+            newUserId = newUsertest.Details.get('newUserId')
+            newUserAddress = newUsertest.Details.get('newUserAddress')
+            
+            long, long = get_geocode(newUserAddress)
             
             #newTaxyCity = newUsertest.Details.get('newTaxyCity')
             #newUserPoint = newUsertest.Details.get('newUserPoint')
             
-            if st.sidebar.button('Add Taxy'):
+            if st.sidebar.button('Complete Sign up'):
                 
-                add_data(newTaxiDName, newTaxyDEmail, 
-                        driver_number = newTaxyDNumber,
-                        taxy_Type = newTaxyType,
-                        taxy_id = newTaxyId, lat_point=latitude,
-                        lon_point=longitude)  
+                add_user_data(newUserName, newUserEmail, 
+                        driver_number = newUserNumber,
+                        taxy_Type = newUserType,
+                        taxy_id = newUserId, lat_point=long,
+                        lon_point=long)  
                 
                 st.sidebar.success("Added {} To fleet".format(newTaxyId))
+        
+          #  view_result = view_all_data()   
+           # view_resultdf = pd.DataFrame(view_result,columns=['driver_name',"driver_email","driver_number", "taxy_Type","latitude","longitude", "taxi_id"])
+            #view_resultdf["color"] = view_resultdf.apply(CabTypecolors, axis=1)
+            #view_resultdf_colorless = view_resultdf.drop(['color',"driver_email","driver_number","latitude","longitude"], axis=1)
+            #view_resultdf_colorless
+
+            #make_map(view_resultdf)
+
+
                 
-                
-                
-        if Driver_opps == 'UpdateAct':
+    if choice == 'UpdateAct':
             UpdateSec = list(clean_df['taxy_id'])
             tobeupSelection = st.sidebar.selectbox('Choose record to update', options = UpdateSec)
             rec = clean_df[clean_df['taxy_id'] == tobeupSelection]
@@ -208,17 +296,7 @@ def main(**state):
             
             #elif choice == "ToRide":
              #   pass
-    if choice == 'GetaRide':
         
-        view_result = view_all_data()   
-        view_resultdf = pd.DataFrame(view_result,columns=['driver_name',"driver_email","driver_number", "taxy_Type","latitude","longitude", "taxi_id"])
-        view_resultdf["color"] = view_resultdf.apply(CabTypecolors, axis=1)
-        view_resultdf_colorless = view_resultdf.drop(['color',"driver_email","driver_number","latitude","longitude"], axis=1)
-        view_resultdf_colorless
-
-        make_map(view_resultdf)
-
-
     # ---- HIDE STREAMLIT STYLE ----
     hide_st_style = """
                 <style>
